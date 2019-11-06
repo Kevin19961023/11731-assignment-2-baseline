@@ -6,6 +6,20 @@ from data import MTDataset, MTDataLoader, Vocab
 from transformer import Transformer
 from tqdm import tqdm
 
+def smooth_one_hot(true_labels, classes, smoothing=0.0):
+    """
+    if smoothing == 0, it's one-hot method
+    if 0 < smoothing < 1, it's smooth method
+
+    """
+    assert 0 <= smoothing < 1
+    confidence = 1.0 - smoothing
+    label_shape = th.Size((true_labels.size(0), classes))
+    with th.no_grad():
+        true_dist = th.empty(size=label_shape, device=true_labels.device)
+        true_dist.fill_(smoothing / (classes - 1))
+        true_dist.scatter_(1, true_labels.data.unsqueeze(1), confidence)
+    return true_dist
 
 def load_data(src_lang, tgt_lang, cached_folder="assignment2/data", overwrite=False):
     """Load data (and cache to file)"""
@@ -62,7 +76,7 @@ def get_args():
     parser.add_argument("--inverse-sqrt-schedule", action="store_true")
     parser.add_argument("--clip-grad", type=float, default=1.0)
     parser.add_argument("--tokens-per-batch", type=int, default=8000)
-    parser.add_argument("--samples-per-batch", type=int, default=128)
+    parser.add_argument("--samples-per-batch", type=int, default=256)
     return parser.parse_args()
 
 
@@ -85,6 +99,7 @@ def train_epoch(model, optim, dataloader, lr_schedule=None, clip_grad=5.0):
     # Model device
     device = list(model.parameters())[0].device
     # Iterate over batches
+    criterion = th.nn.KLDivLoss(size_average=False, reduction="mean")
     itr = tqdm(dataloader)
     for batch in itr:
         optim.zero_grad()
@@ -98,16 +113,17 @@ def train_epoch(model, optim, dataloader, lr_schedule=None, clip_grad=5.0):
         # Negative log likelihood of the target tokens
         # (this selects log_p[i, b, tgt_tokens[i+1, b]]
         # for each batch b, position i)
-        nll = th.nn.functional.nll_loss(
+        nll = criterion(log_p.view(-1, log_p.size(-1)),smooth_one_hot(tgt_tokens[1:].view(-1), len(model.vocab), 0.15))
+        """nll = th.nn.KLDivLoss(
             # Log probabilities (flattened to (l*b) x V)
             log_p.view(-1, log_p.size(-1)),
             # Target tokens (we start from the 1st real token, ignoring <sos>)
-            tgt_tokens[1:].view(-1),
+            smooth_one_hot(tgt_tokens[1:].view(-1), len(model.vocab), 0.15),
             # Don't compute the nll of padding tokens
-            ignore_index=model.vocab["<pad>"],
+            #ignore_index=model.vocab["<pad>"],
             # Take the average
             reduction="mean",
-        )
+        )"""
         # Perplexity (for logging)
         ppl = th.exp(nll).item()
         # Backprop
@@ -234,3 +250,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
