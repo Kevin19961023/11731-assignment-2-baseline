@@ -1,6 +1,7 @@
 from math import pi, sqrt
 import torch as th
 from torch import nn
+import random
 
 # Negative infinity constant
 NEG_INF = -100000
@@ -9,7 +10,7 @@ NEG_INF = -100000
 def GlorotLinear(input_dim, output_dim):
     """Returns a Glorot initialized linear layer for optimal gradient flow"""
     linear = nn.Linear(input_dim, output_dim)
-    nn.init.xavier_uniform_(linear.weight)
+    nn.init.kaiming_uniform_(linear.weight)
     nn.init.constant_(linear.bias, 0)
     return linear
 
@@ -330,6 +331,19 @@ class Transformer(nn.Module):
         self.logits = GlorotLinear(embed_dim, len(vocab))
         # Share embedding and softmax weights
         self.logits.weight = self.embeds.weight
+        self.teach_rate = 0.9
+
+    def load_my_state_dict(self, state_dict):
+        own_state = self.state_dict()
+        for name, param in state_dict.items():
+            if name not in own_state:
+                 continue
+            if isinstance(param, Parameter):
+                # backwards compatibility for serialized parameters
+                param = param.data
+            if own_state[name].shape != param.shape:
+                continue
+            own_state[name].copy_(param)
 
     def encode(self, src_tokens, src_mask=None):
         """
@@ -356,6 +370,27 @@ class Transformer(nn.Module):
         # (to prevent all the residual connections from blowing up)
         return self.layer_norm_enc(x)
 
+    def tf_forward(self, src_tokens, tgt_tokens, src_mask=None):
+        logits = []
+        encodings = self.encode(src_tokens, src_mask)
+        state = self.initial_state()
+
+        L, B = tgt_tokens.shape
+        #print(B)
+        out_tokens =  []
+        for i in range(L):
+            use_teacher_forcing = True if random.random() < self.teach_rate else False
+            current_token = tgt_tokens[i] if use_teacher_forcing or not out_tokens else out_tokens[-1]
+            current_token = (current_token).view(1, -1)
+            log_p, state = self.decode_step(current_token, encodings, state, src_mask)
+            # Sample
+            next_token = log_p.view(B, -1).argmax(dim=1)
+            out_tokens.append(next_token)
+            logits.append(log_p.view(B, -1))
+        logits = th.stack(logits)
+        return logits
+
+
     def forward(self, src_tokens, tgt_tokens, src_mask=None):
         """
         Returns a tensor log_p of shape m x b x |V| where log_p[i, k, w]
@@ -381,6 +416,7 @@ class Transformer(nn.Module):
         pos_offset = self.pos_embeds[:h.size(0)].view(-1, 1, self.embed_dim)
         h += pos_offset.to(h.device).detach()
         # Pass through all decoder layers
+
         for layer in self.decoder_layers:
             h = layer(h, encodings, src_mask=src_mask)
         # Final layer norm so things don't blow up
@@ -390,9 +426,11 @@ class Transformer(nn.Module):
         # softmax weights are shared with the embeddings
         h = self.out_proj(h)
         # obtain logits for every word
-        logits = self.logits(h)
+
         # Return log probs
+        logits = self.logits(h)
         return nn.functional.log_softmax(logits, dim=-1)
+
 
     def decode_step(
         self,
