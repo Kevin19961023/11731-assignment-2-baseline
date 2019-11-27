@@ -12,12 +12,12 @@ python baseline/training.py \
     --n-heads 4 \
     --embed-dim 512 \
     --hidden-dim 512 \
-    --dropout 0.3 \
+    --dropout 0.1 \
     --word-dropout 0.1 \
-    --lr 1e-3 \
+    --lr 5e-4 \
     --n-epochs 50 \
     --tokens-per-batch 4000 \
-    --clip-grad 1.0
+    --clip-grad 0.9
 
 python baseline/translate.py \
     --cuda \

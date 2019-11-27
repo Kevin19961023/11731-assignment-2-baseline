@@ -26,7 +26,7 @@ def get_args():
     parser.add_argument("--n-heads", type=int, default=4)
     parser.add_argument("--embed-dim", type=int, default=512)
     parser.add_argument("--hidden-dim", type=int, default=512)
-    parser.add_argument("--dropout", type=float, default=0.3)
+    parser.add_argument("--dropout", type=float, default=0.1)
     # Translation parameters
     parser.add_argument("--search", type=str, default="beam_search",
                         choices=["random", "greedy", "beam_search"])
